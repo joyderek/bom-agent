@@ -1,0 +1,18 @@
+# Copy this file to config.local.toml and fill in your real values.
+
+api_key = "replace-with-your-real-key"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+search_provider = "tavily"
+tavily_api_key = "replace-with-your-tavily-key"
+serper_api_key = ""
+brave_api_key = ""
+searxng_base_url = ""
+thinking_enabled = false
+temperature = 0
+model_timeout_seconds = 30
+model_max_retries = 0
+max_pages = 8
+max_search_results = 6
+max_tool_calls = 12
+recursion_limit = 24
