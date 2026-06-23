@@ -163,20 +163,20 @@ def _parse_bom_decomposition(raw_text: str) -> BomDecomposition:
     decoder = json.JSONDecoder()
     for candidate in deduped_candidates:
         try:
-            return BomDecomposition.model_validate_json(candidate)
+            return _normalize_decomposition_tree(BomDecomposition.model_validate_json(candidate))
         except Exception:
             pass
         try:
             parsed, _ = decoder.raw_decode(candidate)
-            return BomDecomposition.model_validate(parsed)
+            return _normalize_decomposition_tree(BomDecomposition.model_validate(parsed))
         except Exception:
             pass
 
     try:
-        return BomDecomposition.model_validate_json(text)
+        return _normalize_decomposition_tree(BomDecomposition.model_validate_json(text))
     except Exception as first_error:
         try:
-            return BomDecomposition.model_validate(json.loads(text))
+            return _normalize_decomposition_tree(BomDecomposition.model_validate(json.loads(text)))
         except Exception as second_error:
             raise RuntimeError(
                 "模型返回内容未能通过 BomDecomposition 校验。"
