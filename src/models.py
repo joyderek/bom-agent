@@ -35,6 +35,16 @@ NODE_TYPE_ALIASES = {
 }
 
 
+def _is_usable_evidence_input(value: object) -> bool:
+    if isinstance(value, str):
+        text = value.strip()
+        return text.startswith("http://") or text.startswith("https://")
+    if isinstance(value, dict):
+        url = value.get("url")
+        return isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))
+    return isinstance(value, Evidence)
+
+
 class Evidence(BaseModel):
     url: HttpUrl
     title: str = Field(..., description="Short human-readable source title.")
@@ -43,41 +53,159 @@ class Evidence(BaseModel):
         description="Concise evidence summary tied to the source, not a raw page dump.",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_evidence(cls, value: object) -> object:
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("http://") or text.startswith("https://"):
+                return {"url": text, "title": text, "snippet": text}
+        return value
+
+
+class SupplierMarketShare(BaseModel):
+    supplier_name: str = Field(..., description="Company or organization name.")
+    market_position: Optional[str] = Field(
+        default=None,
+        description="Qualitative position such as leader, top tier, regional specialist, emerging supplier, or niche player.",
+    )
+    market_share: Optional[str] = Field(
+        default=None,
+        description="Market share estimate as reported or inferred from evidence, for example '约 20%' or 'top 5 by shipments'.",
+    )
+    geography: Optional[str] = Field(
+        default=None,
+        description="Relevant market geography such as global, China, Europe, North America, or application segment.",
+    )
+    rationale: str = Field(..., description="Why this supplier is relevant to this module.")
+    confidence: ConfidenceLevel = "medium"
+    evidence: List[Evidence] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_supplier_aliases(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        if "supplier_name" not in normalized:
+            for alias in ("name", "company", "vendor", "manufacturer"):
+                if isinstance(normalized.get(alias), str):
+                    normalized["supplier_name"] = normalized[alias]
+                    break
+        if "market_share" not in normalized:
+            for alias in ("share", "market_share_estimate"):
+                if isinstance(normalized.get(alias), str):
+                    normalized["market_share"] = normalized[alias]
+                    break
+        if "rationale" not in normalized:
+            normalized["rationale"] = "模型基于研究材料和行业常识识别为该模块的代表性供应商。"
+        if "confidence" not in normalized:
+            normalized["confidence"] = "medium"
+        if "evidence" in normalized and isinstance(normalized["evidence"], list):
+            normalized["evidence"] = [item for item in normalized["evidence"] if _is_usable_evidence_input(item)]
+        return normalized
+
 
 class BomItem(BaseModel):
-    name: str
+    name: str = Field(..., description="Direct downstream item name.")
+    description: Optional[str] = Field(
+        default=None,
+        description="Brief description of the direct downstream item, including key specs when available.",
+    )
+    supplier_market: Optional[str] = Field(
+        default=None,
+        description="Current market supply situation in one concise sentence, including major suppliers and shares when available.",
+    )
+    cost_share: Optional[str] = Field(
+        default=None,
+        description="Estimated cost share of this direct downstream item in the parent product or system, e.g. '30-40%'.",
+    )
     category: Optional[str] = Field(
         default=None,
+        exclude=True,
         description="Optional functional or business grouping such as power, structure, packaging, final assembly, upstream wafer fabrication, logistics.",
     )
     node_type: NodeType = Field(
-        ...,
+        default="component",
+        exclude=True,
         description="Generic node kind so the same schema can represent products, industrial systems, process steps, and supply-chain stages.",
-    )
-    description: Optional[str] = Field(
-        default=None,
-        description="Short description of what this node is or does within the decomposition.",
     )
     quantity: Optional[str] = Field(
         default=None,
+        exclude=True,
         description="Quantity if discoverable. Keep textual units when needed, e.g. '12 screws'.",
     )
     unit: Optional[str] = Field(
         default=None,
+        exclude=True,
         description="Optional unit associated with quantity, capacity, throughput, or scale.",
     )
     role: Optional[str] = Field(
         default=None,
+        exclude=True,
         description="Why this node matters within the parent structure, for example energy storage, structural support, distribution, contract manufacturing.",
     )
     stage: Optional[str] = Field(
         default=None,
+        exclude=True,
         description="Optional lifecycle or supply-chain stage such as upstream, midstream, downstream, manufacturing, integration, distribution, after-sales.",
     )
-    confidence: ConfidenceLevel
-    rationale: str = Field(..., description="Why this item exists in the BOM.")
-    evidence: List[Evidence] = Field(default_factory=list)
-    children: List["BomItem"] = Field(default_factory=list)
+    confidence: ConfidenceLevel = Field(default="medium", exclude=True)
+    rationale: Optional[str] = Field(default=None, exclude=True, description="Why this item exists in the BOM.")
+    evidence: List[Evidence] = Field(default_factory=list, exclude=True)
+    market_analysis: Optional[str] = Field(
+        default=None,
+        exclude=True,
+        description="Short market structure summary for this module or component, including concentration and share caveats when available.",
+    )
+    suppliers: List[SupplierMarketShare] = Field(default_factory=list, exclude=True)
+    children: List["BomItem"] = Field(default_factory=list, exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_item_defaults(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        if "confidence" not in normalized:
+            normalized["confidence"] = "medium"
+        if "rationale" not in normalized:
+            normalized["rationale"] = normalized.get("description") or "模型基于研究材料和通用结构知识判断该节点属于 BOM 分解。"
+        if "evidence" in normalized and isinstance(normalized["evidence"], list):
+            normalized["evidence"] = [item for item in normalized["evidence"] if _is_usable_evidence_input(item)]
+        if "suppliers" in normalized and isinstance(normalized["suppliers"], list):
+            normalized["suppliers"] = [item for item in normalized["suppliers"] if isinstance(item, dict)]
+        if "supplier_market" not in normalized:
+            for alias in ("supplier", "suppliers_summary", "market_supply", "current_market_supply"):
+                if isinstance(normalized.get(alias), str):
+                    normalized["supplier_market"] = normalized[alias]
+                    break
+        if "cost_share" not in normalized:
+            for alias in ("cost", "cost_ratio", "cost_percentage", "cost_percent", "bom_cost_share"):
+                if isinstance(normalized.get(alias), str):
+                    normalized["cost_share"] = normalized[alias]
+                    break
+        if "supplier_market" not in normalized:
+            market_parts = []
+            if isinstance(normalized.get("market_analysis"), str):
+                market_parts.append(normalized["market_analysis"])
+            suppliers = normalized.get("suppliers")
+            if isinstance(suppliers, list) and suppliers:
+                supplier_parts = []
+                for supplier in suppliers:
+                    if not isinstance(supplier, dict):
+                        continue
+                    name = supplier.get("supplier_name") or supplier.get("name") or supplier.get("company")
+                    share = supplier.get("market_share") or supplier.get("share")
+                    if isinstance(name, str) and isinstance(share, str):
+                        supplier_parts.append(f"{name}{share}")
+                    elif isinstance(name, str):
+                        supplier_parts.append(name)
+                if supplier_parts:
+                    market_parts.append("主要供应商：" + "、".join(supplier_parts))
+            if market_parts:
+                normalized["supplier_market"] = "；".join(market_parts)
+        return normalized
 
     @field_validator("node_type", mode="before")
     @classmethod
@@ -139,6 +267,8 @@ class BomDecomposition(BaseModel):
                 if isinstance(normalized.get(alias), str):
                     normalized["subject_description"] = normalized[alias]
                     break
+        if "subject_description" not in normalized:
+            normalized["subject_description"] = "未明确"
         if "subject_description" not in normalized and isinstance(subject, dict):
             for alias in ("description", "summary", "name"):
                 if isinstance(subject.get(alias), str):
@@ -156,11 +286,24 @@ class BomDecomposition(BaseModel):
                     break
         return normalized
 
+    @field_validator("subject_description", mode="before")
+    @classmethod
+    def normalize_subject_description(cls, value: object) -> object:
+        if value is None:
+            return "未明确"
+        if isinstance(value, str) and not value.strip():
+            return "未明确"
+        return value
+
     @field_validator("scope_notes", mode="before")
     @classmethod
     def normalize_scope_notes(cls, value: object) -> object:
+        if value is None:
+            return []
         if isinstance(value, str):
-            return [value]
+            return [value] if value.strip() else []
+        if isinstance(value, list):
+            return [item for item in value if not isinstance(item, str) or item.strip()]
         return value
 
 

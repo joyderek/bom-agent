@@ -1,12 +1,12 @@
 # bom-agent
 
-基于 LangChain 的 BOM 拆解 agent。输入一个产品名，agent 会尽量搜索公开网页信息，识别产品的直接下游模块，并输出结构化 JSON。
+基于 LangChain 的结构分解 agent。输入一个对象名，agent 会尽量搜索公开网页信息，对其进行通用的结构化拆解，并输出结构化 JSON。
 
 ## 设计目标
 
 - 以公开信息为主：优先搜索拆机、规格页、维修指南、专利、FCC/监管材料、供应链资料、材料说明。
-- 强制结构化输出：不是自由文本，而是可消费的 BOM JSON。
-- 支持不完全信息：对无法直接证实的模块，允许行业常识推断，但必须降低置信度并写明依据。
+- 强制结构化输出：不是自由文本，而是可消费的分解 JSON。
+- 支持不完全信息：对无法直接证实的节点，允许行业常识推断，但必须降低置信度并写明依据。
 
 ## 当前实现
 
@@ -16,7 +16,7 @@
   - `web_search`：公网搜索产品/组件/材料线索
   - `read_web_page`：通过 Jina Reader 抓取网页可读正文
 - 输出模型：
-  - `product -> direct downstream modules`
+  - `subject -> top level nodes -> optional child nodes`
 
 ## 安装
 
@@ -64,31 +64,43 @@ bom-agent "iPhone 15 Pro"
 bom-agent "MacBook Air" --context "13-inch M3 model released in 2024"
 ```
 
+输出可读文本：
+
+```bash
+bom-agent "锂电产业链" --format text
+```
+
 ## 输出示例
 
 ```json
 {
-  "product_name": "Example Device",
-  "product_description": "Short description",
+  "subject_name": "Example Device",
+  "subject_kind": "product",
+  "subject_description": "Short description of the device and the framing used for this analysis.",
+  "decomposition_goal": "Explain the main functional structure of the product.",
+  "decomposition_basis": "functional modules",
+  "depth_policy": "Only direct downstream items, no further decomposition.",
   "scope_notes": [
     "Battery cathode chemistry inferred from teardown and supplier context."
   ],
-  "top_level_bom": [
+  "top_level_nodes": [
     {
-      "name": "Rear enclosure",
-      "category": "enclosure",
-      "quantity": "1",
-      "material_type": "module",
-      "confidence": "high",
-      "rationale": "Primary outer shell identified from teardown photos.",
-      "evidence": [
-        {
-          "url": "https://example.com/teardown",
-          "title": "Teardown",
-          "snippet": "CNC-machined aluminum housing is visible after removing the display."
-        }
-      ],
-      "children": []
+      "name": "显示屏",
+      "description": "6.1 英寸 OLED 显示屏，支持高刷新率",
+      "supplier_market": "约 80% 由三星供应，约 20% 由京东方供应",
+      "cost_share": "30-40%"
+    },
+    {
+      "name": "处理器",
+      "description": "A 系列 SoC，含 CPU/GPU/神经引擎",
+      "supplier_market": "主要供应商为台积电代工，苹果自研设计",
+      "cost_share": "15-25%"
+    },
+    {
+      "name": "电池",
+      "description": "锂离子电池，容量约 3300mAh",
+      "supplier_market": "主要供应商包括德赛电池、欣旺达，具体份额未公开",
+      "cost_share": "5-10%"
     }
   ]
 }
@@ -154,5 +166,5 @@ src/
 ## 下一步建议
 
 - 接入正式搜索 API，例如 Exa、SerpAPI 或 Tavily。
-- 为常见电子产品增加拆机源白名单和页面清洗逻辑。
-- 增加结果去重、证据打分、材料词典和单独的 BOM 树校验器。
+- 为不同对象类型增加更明确的分解策略模板，例如产品结构、工艺流程、供应链、产业链。
+- 增加结果去重、证据打分、术语词典和单独的分解树校验器。

@@ -46,30 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _render_node(node: BomItem, depth: int = 0) -> list[str]:
-    indent = "  " * depth
-    meta_parts = [node.node_type, node.confidence]
-    if node.category:
-        meta_parts.append(node.category)
-    if node.stage:
-        meta_parts.append(node.stage)
-    line = f"{indent}- {node.name} [{', '.join(meta_parts)}]"
-    lines = [line]
-    if node.description:
-        lines.append(f"{indent}  说明: {node.description}")
-    if node.role:
-        lines.append(f"{indent}  角色: {node.role}")
-    if node.quantity:
-        quantity_line = f"{indent}  规模: {node.quantity}"
-        if node.unit:
-            quantity_line += f" {node.unit}"
-        lines.append(quantity_line)
-    lines.append(f"{indent}  依据: {node.rationale}")
-    if node.evidence:
-        for evidence in node.evidence:
-            lines.append(f"{indent}  证据: {evidence.title} | {evidence.url}")
-    for child in node.children:
-        lines.extend(_render_node(child, depth + 1))
+def _render_node(node: BomItem) -> list[str]:
+    lines = [f"- 名称：{node.name}"]
+    lines.append(f"  描述：{node.description or '未明确'}")
+    lines.append(f"  供应商：{node.supplier_market or '主要供应商和份额未明确'}")
+    lines.append(f"  成本：{node.cost_share or '未明确'}")
     return lines
 
 

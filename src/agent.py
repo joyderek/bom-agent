@@ -18,7 +18,12 @@ from src.models import (
     BomResearchTrace,
     ResearchTraceMessage,
 )
-from src.prompts import SYSTEM_PROMPT, build_structuring_prompt, build_user_prompt
+from src.prompts import (
+    SYSTEM_PROMPT,
+    build_structuring_prompt,
+    build_supplier_enrichment_prompt,
+    build_user_prompt,
+)
 from src.web_tools import build_tools
 
 
@@ -196,11 +201,9 @@ def _repair_bom_output(
         "不要输出 Markdown，不要输出代码块，不要输出解释文字，只返回 JSON 对象本身。\n\n"
         "必须满足这些要求：\n"
         "- 顶层至少包含 subject_name, subject_kind, subject_description, scope_notes, top_level_nodes\n"
-        "- top_level_nodes 中每个节点至少包含 name, node_type, confidence, rationale, evidence, children\n"
-        "- confidence 只能是 high, medium, low\n"
-        "- node_type 只能是 end_item, assembly, module, component, material, process, service, supplier, stage, other\n"
-        "- evidence 必须是数组，元素包含 url, title, snippet\n"
-        "- children 必须是数组\n\n"
+        "- top_level_nodes 只保留直接下游一级节点\n"
+        "- 每个节点只需要 name, description, supplier_market, cost_share 四个业务字段\n"
+        "- 不要输出 children，不要输出多层 BOM\n\n"
         "待修复内容如下：\n"
         f"{raw_text}"
     )
@@ -365,21 +368,63 @@ def _structure_bom_output(
         raise RuntimeError("; ".join(errors)) from exc
 
 
+def _enrich_bom_suppliers(
+    decomposition: BomDecomposition,
+    product_name: str,
+    product_context: str | None,
+    trace: BomResearchTrace,
+    config: AgentConfig,
+) -> BomDecomposition:
+    model = _build_model(config)
+    prompt = build_supplier_enrichment_prompt(
+        product_name=product_name,
+        product_context=product_context,
+        research_output=trace.research_output,
+        decomposition_json=decomposition.model_dump_json(indent=2),
+    )
+    errors: list[str] = []
+    for method, kwargs in (
+        ("json_schema", {"strict": True}),
+        ("json_mode", {}),
+    ):
+        try:
+            structured_model = model.with_structured_output(
+                BomDecomposition,
+                method=method,
+                **kwargs,
+            )
+            structured = structured_model.invoke(prompt)
+            if isinstance(structured, BomDecomposition):
+                return _normalize_decomposition_tree(structured)
+            return _normalize_decomposition_tree(BomDecomposition.model_validate(structured))
+        except Exception as exc:
+            errors.append(f"{method}: {type(exc).__name__}: {exc}")
+
+    try:
+        response = model.invoke(prompt)
+        text = _extract_text_from_message(response)
+        return _normalize_decomposition_tree(_parse_bom_decomposition(text))
+    except Exception as exc:
+        errors.append(f"plain_json: {type(exc).__name__}: {exc}")
+        decomposition.scope_notes.append(
+            "供应商与市占补充阶段失败，已保留原始结构化分解结果；"
+            f"失败原因：{'; '.join(errors)[:1200]}"
+        )
+        return decomposition
+
+
 def _normalize_decomposition_tree(decomposition: BomDecomposition) -> BomDecomposition:
-    if len(decomposition.top_level_nodes) != 1:
-        return decomposition
-    root = decomposition.top_level_nodes[0]
-    if not root.children:
-        return decomposition
-    root_name = root.name.strip().lower()
-    subject_name = decomposition.subject_name.strip().lower()
-    if root.node_type != "end_item":
-        return decomposition
-    if subject_name not in root_name and root_name not in subject_name:
-        return decomposition
-    decomposition.top_level_nodes = root.children
-    if root.rationale and not any(root.rationale == note for note in decomposition.scope_notes):
-        decomposition.scope_notes.insert(0, root.rationale)
+    if len(decomposition.top_level_nodes) == 1:
+        root = decomposition.top_level_nodes[0]
+        root_name = root.name.strip().lower()
+        subject_name = decomposition.subject_name.strip().lower()
+        if root.children and root.node_type == "end_item" and (subject_name in root_name or root_name in subject_name):
+            decomposition.top_level_nodes = root.children
+            if root.rationale and root.rationale not in decomposition.scope_notes:
+                decomposition.scope_notes.insert(0, root.rationale)
+
+    for node in decomposition.top_level_nodes:
+        node.children = []
     return decomposition
 
 
@@ -463,6 +508,13 @@ def run_bom_decomposition_with_trace(
                 trace=trace,
                 config=active_config,
             )
+            decomposition = _enrich_bom_suppliers(
+                decomposition=decomposition,
+                product_name=product_name,
+                product_context=product_context,
+                trace=trace,
+                config=active_config,
+            )
         except Exception as exc:
             saved_hint = (
                 f" 一阶段结果已保存到 {research_trace_path}，可使用 --from-research 重跑二阶段。"
@@ -500,6 +552,13 @@ def structure_bom_from_research_trace(
         raise RuntimeError("缺少 product_name，无法基于一阶段结果重跑二阶段。")
     effective_product_context = product_context if product_context is not None else trace.product_context
     decomposition = _structure_bom_output(
+        product_name=effective_product_name,
+        product_context=effective_product_context,
+        trace=trace,
+        config=active_config,
+    )
+    decomposition = _enrich_bom_suppliers(
+        decomposition=decomposition,
         product_name=effective_product_name,
         product_context=effective_product_context,
         trace=trace,
