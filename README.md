@@ -88,19 +88,27 @@ bom-agent "锂电产业链" --format text
       "name": "显示屏",
       "description": "6.1 英寸 OLED 显示屏，支持高刷新率",
       "supplier_market": "约 80% 由三星供应，约 20% 由京东方供应",
-      "cost_share": "30-40%"
+      "cost_share": "30-40%",
+      "sources": [
+        {"name": "Counterpoint Research", "url": "https://www.counterpointresearch.com/..."},
+        {"name": "DSCC", "url": "https://www.displaysupplychain.com/..."}
+      ]
     },
     {
       "name": "处理器",
       "description": "A 系列 SoC，含 CPU/GPU/神经引擎",
       "supplier_market": "主要供应商为台积电代工，苹果自研设计",
-      "cost_share": "15-25%"
+      "cost_share": "15-25%",
+      "sources": [
+        {"name": "TechInsights", "url": "https://www.techinsights.com/..."}
+      ]
     },
     {
       "name": "电池",
       "description": "锂离子电池，容量约 3300mAh",
       "supplier_market": "主要供应商包括德赛电池、欣旺达，具体份额未公开",
-      "cost_share": "5-10%"
+      "cost_share": "5-10%",
+      "sources": null
     }
   ]
 }

@@ -106,6 +106,38 @@ class SupplierMarketShare(BaseModel):
         return normalized
 
 
+class SourceRef(BaseModel):
+    name: str = Field(..., description="Source name such as organization, report, or media outlet, e.g. '平安证券'.")
+    url: Optional[str] = Field(
+        default=None,
+        description="Source URL or reference identifier.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_source_ref(cls, value: object) -> object:
+        if isinstance(value, str):
+            text = value.strip()
+            # Try to parse "name[url]" or "name" patterns
+            if "[" in text and text.endswith("]"):
+                bracket_start = text.rfind("[")
+                name_part = text[:bracket_start].strip()
+                url_part = text[bracket_start + 1:-1].strip()
+                return {"name": name_part, "url": url_part}
+            return {"name": text}
+        if isinstance(value, dict):
+            normalized = dict(value)
+            if "name" not in normalized:
+                for alias in ("title", "source", "source_name"):
+                    if isinstance(normalized.get(alias), str):
+                        normalized["name"] = normalized[alias]
+                        break
+            if "name" not in normalized:
+                normalized["name"] = "未命名来源"
+            return normalized
+        return value
+
+
 class BomItem(BaseModel):
     name: str = Field(..., description="Direct downstream item name.")
     description: Optional[str] = Field(
@@ -119,6 +151,10 @@ class BomItem(BaseModel):
     cost_share: Optional[str] = Field(
         default=None,
         description="Estimated cost share of this direct downstream item in the parent product or system, e.g. '30-40%'.",
+    )
+    sources: Optional[List[SourceRef]] = Field(
+        default=None,
+        description="Key information sources for this item, each with name and optional URL, e.g. 平安证券、雪球.",
     )
     category: Optional[str] = Field(
         default=None,
@@ -185,6 +221,13 @@ class BomItem(BaseModel):
                 if isinstance(normalized.get(alias), str):
                     normalized["cost_share"] = normalized[alias]
                     break
+        if "sources" not in normalized:
+            for alias in ("source", "info_sources", "references", "refs", "urls"):
+                if isinstance(normalized.get(alias), list):
+                    normalized["sources"] = normalized[alias]
+                    break
+        if "sources" in normalized and isinstance(normalized["sources"], list):
+            normalized["sources"] = [item for item in normalized["sources"] if isinstance(item, (dict, str))]
         if "supplier_market" not in normalized:
             market_parts = []
             if isinstance(normalized.get("market_analysis"), str):

@@ -51,6 +51,16 @@ def _render_node(node: BomItem) -> list[str]:
     lines.append(f"  描述：{node.description or '未明确'}")
     lines.append(f"  供应商：{node.supplier_market or '主要供应商和份额未明确'}")
     lines.append(f"  成本：{node.cost_share or '未明确'}")
+    if node.sources:
+        source_parts = []
+        for source in node.sources:
+            if source.url:
+                source_parts.append(f"{source.name}[{source.url}]")
+            else:
+                source_parts.append(source.name)
+        lines.append(f"  来源：{'，'.join(source_parts)}")
+    else:
+        lines.append(f"  来源：未明确")
     return lines
 
 
