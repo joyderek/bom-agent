@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 
 ConfidenceLevel = Literal["high", "medium", "low"]
@@ -27,11 +27,17 @@ class BomItem(BaseModel):
         default=None,
         description="Quantity if discoverable. Keep textual units when needed, e.g. '12 screws'.",
     )
-    material_type: Literal["assembly", "component", "subcomponent", "raw_material"]
+    material_type: Literal["assembly", "component", "module"]
     confidence: ConfidenceLevel
     rationale: str = Field(..., description="Why this item exists in the BOM.")
     evidence: List[Evidence] = Field(default_factory=list)
     children: List["BomItem"] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_leaf_only(self) -> "BomItem":
+        if self.children:
+            raise ValueError("Direct-downstream-module mode requires all BOM items to be leaf nodes.")
+        return self
 
 
 class BomDecomposition(BaseModel):

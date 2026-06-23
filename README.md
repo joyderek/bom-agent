@@ -1,12 +1,12 @@
 # bom-agent
 
-基于 LangChain 的 BOM 拆解 agent。输入一个产品名，agent 会尽量搜索公开网页信息，递归拆出主组件、子组件，并尽可能下钻到原材料粒度，输出结构化 JSON。
+基于 LangChain 的 BOM 拆解 agent。输入一个产品名，agent 会尽量搜索公开网页信息，识别产品的直接下游模块，并输出结构化 JSON。
 
 ## 设计目标
 
 - 以公开信息为主：优先搜索拆机、规格页、维修指南、专利、FCC/监管材料、供应链资料、材料说明。
 - 强制结构化输出：不是自由文本，而是可消费的 BOM JSON。
-- 支持不完全信息：对无法直接证实的材料，允许行业常识推断，但必须降低置信度并写明依据。
+- 支持不完全信息：对无法直接证实的模块，允许行业常识推断，但必须降低置信度并写明依据。
 
 ## 当前实现
 
@@ -16,7 +16,7 @@
   - `web_search`：公网搜索产品/组件/材料线索
   - `read_web_page`：通过 Jina Reader 抓取网页可读正文
 - 输出模型：
-  - `product -> assemblies -> components -> subcomponents -> raw_material`
+  - `product -> direct downstream modules`
 
 ## 安装
 
@@ -55,13 +55,13 @@ recursion_limit = 24
 ## 使用
 
 ```bash
-bom-agent "iPhone 15 Pro" --pretty
+bom-agent "iPhone 15 Pro"
 ```
 
 带补充上下文：
 
 ```bash
-bom-agent "MacBook Air" --context "13-inch M3 model released in 2024" --pretty
+bom-agent "MacBook Air" --context "13-inch M3 model released in 2024"
 ```
 
 ## 输出示例
@@ -78,7 +78,7 @@ bom-agent "MacBook Air" --context "13-inch M3 model released in 2024" --pretty
       "name": "Rear enclosure",
       "category": "enclosure",
       "quantity": "1",
-      "material_type": "component",
+      "material_type": "module",
       "confidence": "high",
       "rationale": "Primary outer shell identified from teardown photos.",
       "evidence": [
@@ -88,18 +88,7 @@ bom-agent "MacBook Air" --context "13-inch M3 model released in 2024" --pretty
           "snippet": "CNC-machined aluminum housing is visible after removing the display."
         }
       ],
-      "children": [
-        {
-          "name": "Aluminum alloy",
-          "category": "metal",
-          "quantity": null,
-          "material_type": "raw_material",
-          "confidence": "medium",
-          "rationale": "Outer shell is described as aluminum in multiple sources.",
-          "evidence": [],
-          "children": []
-        }
-      ]
+      "children": []
     }
   ]
 }

@@ -1,7 +1,7 @@
 [project]
 name = "bom-agent"
 version = "0.1.0"
-description = "LangChain-based BOM decomposition agent that expands products down to raw-material granularity using public web information."
+description = "LangChain-based BOM decomposition agent that identifies a product's direct downstream modules using public web information."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -60,6 +60,46 @@ def _tavily_search(api_key: str, query: str, max_results: int) -> dict[str, Any]
     }
 
 
+def _tavily_extract(api_key: str, url: str) -> dict[str, Any]:
+    response = requests.post(
+        "https://api.tavily.com/extract",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
+        json={
+            "urls": [url],
+            "extract_depth": "advanced",
+            "format": "markdown",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    source = data if isinstance(data, dict) else {}
+    results = source.get("results", [])
+    first = results[0] if isinstance(results, list) and results else {}
+    content = first.get("raw_content", "") or ""
+    if not content.strip():
+        failed_results = source.get("failed_results", [])
+        failure_detail = failed_results[0] if isinstance(failed_results, list) and failed_results else {}
+        failure_reason = ""
+        if isinstance(failure_detail, dict):
+            failure_reason = str(
+                failure_detail.get("error")
+                or failure_detail.get("reason")
+                or failure_detail.get("message")
+                or ""
+            ).strip()
+        raise RequestException(f"Tavily extract returned empty content. {failure_reason}".strip())
+    return {
+        "url": first.get("url", url),
+        "content": content,
+        "failed_results": source.get("failed_results", []),
+    }
+
+
 def _serper_search(api_key: str, query: str, max_results: int) -> dict[str, Any]:
     response = requests.post(
         "https://google.serper.dev/search",
@@ -256,26 +296,38 @@ def build_tools(
 
     @tool("read_web_page", args_schema=FetchInput)
     def read_web_page(url: str) -> str:
-        """Fetch a readable version of a public web page using Jina's reader mirror."""
+        """Fetch readable page content, preferring Tavily Extract when available."""
         try:
-            mirror_url = (
-                f"https://r.jina.ai/http://{url.removeprefix('https://').removeprefix('http://')}"
-            )
-            response = requests.get(
-                mirror_url,
-                headers={"User-Agent": USER_AGENT},
-                timeout=30,
-            )
-            response.raise_for_status()
-            text = response.text.strip()
-            payload: dict[str, Any] = {
-                "ok": True,
-                "url": url,
-                "content": textwrap.shorten(text, width=12000, placeholder=" ...[truncated]"),
-            }
+            if tavily_api_key:
+                extracted = _tavily_extract(tavily_api_key, url)
+                text = extracted.get("content", "").strip()
+                payload: dict[str, Any] = {
+                    "ok": True,
+                    "provider": "tavily_extract",
+                    "url": extracted.get("url", url),
+                    "content": textwrap.shorten(text, width=12000, placeholder=" ...[truncated]"),
+                }
+            else:
+                mirror_url = (
+                    f"https://r.jina.ai/http://{url.removeprefix('https://').removeprefix('http://')}"
+                )
+                response = requests.get(
+                    mirror_url,
+                    headers={"User-Agent": USER_AGENT},
+                    timeout=30,
+                )
+                response.raise_for_status()
+                text = response.text.strip()
+                payload = {
+                    "ok": True,
+                    "provider": "jina_reader",
+                    "url": url,
+                    "content": textwrap.shorten(text, width=12000, placeholder=" ...[truncated]"),
+                }
         except RequestException as exc:
             payload = {
                 "ok": False,
+                "provider": "tavily_extract" if tavily_api_key else "jina_reader",
                 "url": url,
                 "error": f"{type(exc).__name__}: {exc}",
                 "content": "",
